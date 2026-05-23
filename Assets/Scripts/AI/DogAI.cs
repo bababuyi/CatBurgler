@@ -2,27 +2,11 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.AI;
 
-/// <summary>
-/// The dog enemy. Full state machine driven by vision and sound detection.
-///
-/// STATE FLOW:
-///   Resting ──► Patrol ──► Suspicious ──► Alert/Chase ──► ReturnToBasket ──► Resting
-///                                                   ▲                              │
-///                              Hiss ───────► Stunned ──────────────────────────────┘
-///
-/// SETUP CHECKLIST:
-///   1. Add NavMeshAgent component — bake a NavMesh for your level.
-///   2. Assign waypoints[] in the inspector for patrol path.
-///   3. Assign basket transform (the dog bed GameObject).
-///   4. Set obstructionMask to layers that block line-of-sight (walls, furniture).
-///   5. Player GameObject must have the "Player" tag.
-/// </summary>
 [RequireComponent(typeof(NavMeshAgent))]
 public class DogAI : MonoBehaviour
 {
     public enum DogState { Resting, Patrol, Suspicious, Alert, Chase, ReturnToBasket, Stunned }
 
-    // ── Patrol ───────────────────────────────────────────────────────────────
     [Header("Patrol")]
     [Tooltip("Ordered list of positions the dog walks between.")]
     public Transform[] waypoints;
@@ -32,7 +16,6 @@ public class DogAI : MonoBehaviour
     [Tooltip("How many full patrol loops before the dog heads home to rest.")]
     public int patrolCyclesBeforeRest = 2;
 
-    // ── Basket / Comfort Zone ────────────────────────────────────────────────
     [Header("Basket (Comfort Zone)")]
     [Tooltip("The dog's bed. It returns here to rest and after being hissed at.")]
     public Transform basket;
@@ -41,7 +24,6 @@ public class DogAI : MonoBehaviour
     [Tooltip("Distance from basket considered 'arrived'.")]
     public float basketArrivalRadius = 1.2f;
 
-    // ── Vision ───────────────────────────────────────────────────────────────
     [Header("Vision")]
     public float viewDistance = 10f;
     [Tooltip("Half-angle of the vision cone in degrees. 60 = 120° total FOV.")]
@@ -51,14 +33,12 @@ public class DogAI : MonoBehaviour
     [Tooltip("Layers that block line-of-sight. Usually 'Default' or a 'Wall' layer.")]
     public LayerMask obstructionMask;
 
-    // ── Sound Detection ──────────────────────────────────────────────────────
     [Header("Sound Detection")]
     [Tooltip("Within this range a noise makes the dog suspicious.")]
     public float suspicionSoundRadius = 8f;
     [Tooltip("Within this range a noise immediately alerts the dog.")]
     public float alertSoundRadius = 3f;
 
-    // ── Chase ─────────────────────────────────────────────────────────────────
     [Header("Chase")]
     public float chaseSpeed = 5.5f;
     [Tooltip("How close the dog gets before catching the player.")]
@@ -66,7 +46,6 @@ public class DogAI : MonoBehaviour
     [Tooltip("Seconds without seeing the player before giving up the chase.")]
     public float losePlayerTime = 5f;
 
-    // ── Suspicion ─────────────────────────────────────────────────────────────
     [Header("Suspicion")]
     public float suspiciousSpeed = 2.8f;
     [Tooltip("How long the dog sniffs around before giving up.")]
@@ -74,7 +53,6 @@ public class DogAI : MonoBehaviour
     [Tooltip("Seconds of continuous eye contact before the dog goes to alert.")]
     public float timeToAlert = 1.5f;
 
-    // ── Public State ──────────────────────────────────────────────────────────
     public DogState CurrentState { get; private set; } = DogState.Resting;
 
     private NavMeshAgent agent;
@@ -84,27 +62,47 @@ public class DogAI : MonoBehaviour
     private int patrolCyclesCompleted;
     private float stateTimer;
     private float losePlayerTimer;
-    private float alertBuildupTimer;    // Time dog has had eyes on player
+    private float alertBuildupTimer;
     private bool waitingAtWaypoint;
     private Vector3 lastKnownPlayerPos;
     private Vector3 lastHeardPosition;
-
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     private void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
 
         var player = GameObject.FindGameObjectWithTag("Player");
-        if (player) playerTransform = player.transform;
+        if (player)
+        {
+            playerTransform = player.transform;
+            Debug.Log("[DogAI] Player found: " + player.name);
+        }
+        else
+        {
+            Debug.LogWarning("[DogAI] No GameObject with tag 'Player' found!");
+        }
     }
 
-    private void OnEnable()  => NoiseSystem.OnNoiseEmitted += HandleNoise;
+    private void OnEnable() => NoiseSystem.OnNoiseEmitted += HandleNoise;
     private void OnDisable() => NoiseSystem.OnNoiseEmitted -= HandleNoise;
 
     private void Start()
     {
-        if (basket == null) basket = transform;
+        if (basket == null)
+        {
+            basket = transform;
+            Debug.LogWarning("[DogAI] No basket assigned — using dog's own position as basket.");
+        }
+        else
+        {
+            Debug.Log("[DogAI] Basket set to: " + basket.name);
+        }
+
+        if (waypoints == null || waypoints.Length == 0)
+            Debug.LogWarning("[DogAI] No waypoints assigned — dog will not patrol.");
+        else
+            Debug.Log("[DogAI] " + waypoints.Length + " waypoints assigned.");
+
         EnterState(DogState.Resting);
     }
 
@@ -112,20 +110,19 @@ public class DogAI : MonoBehaviour
     {
         switch (CurrentState)
         {
-            case DogState.Resting:          UpdateResting();        break;
-            case DogState.Patrol:           UpdatePatrol();         break;
-            case DogState.Suspicious:       UpdateSuspicious();     break;
-            case DogState.Alert:            UpdateAlert();          break;
-            case DogState.Chase:            UpdateChase();          break;
-            case DogState.ReturnToBasket:   UpdateReturnToBasket(); break;
-            case DogState.Stunned:                                  break;
+            case DogState.Resting: UpdateResting(); break;
+            case DogState.Patrol: UpdatePatrol(); break;
+            case DogState.Suspicious: UpdateSuspicious(); break;
+            case DogState.Alert: UpdateAlert(); break;
+            case DogState.Chase: UpdateChase(); break;
+            case DogState.ReturnToBasket: UpdateReturnToBasket(); break;
+            case DogState.Stunned: break;
         }
     }
 
-    // ── State Machine: Enter ──────────────────────────────────────────────────
-
     private void EnterState(DogState newState)
     {
+        Debug.Log("[DogAI] State: " + CurrentState + " -> " + newState);
         CurrentState = newState;
         stateTimer = 0f;
 
@@ -133,6 +130,7 @@ public class DogAI : MonoBehaviour
         {
             case DogState.Resting:
                 agent.isStopped = true;
+                Debug.Log("[DogAI] Resting at basket for " + restDuration + "s.");
                 break;
 
             case DogState.Patrol:
@@ -146,6 +144,7 @@ public class DogAI : MonoBehaviour
                 agent.speed = suspiciousSpeed;
                 agent.SetDestination(lastHeardPosition);
                 alertBuildupTimer = 0f;
+                Debug.Log("[DogAI] Suspicious — investigating noise at " + lastHeardPosition);
                 break;
 
             case DogState.Alert:
@@ -153,29 +152,30 @@ public class DogAI : MonoBehaviour
                 agent.isStopped = false;
                 agent.speed = chaseSpeed;
                 losePlayerTimer = 0f;
+                Debug.Log("[DogAI] ALERT — chasing player!");
                 break;
 
             case DogState.ReturnToBasket:
                 agent.isStopped = false;
                 agent.speed = patrolSpeed;
                 agent.SetDestination(basket.position);
+                Debug.Log("[DogAI] Returning to basket.");
                 break;
 
             case DogState.Stunned:
                 agent.isStopped = true;
+                Debug.Log("[DogAI] Stunned by hiss!");
                 break;
         }
     }
-
-    // ── State Machine: Update ─────────────────────────────────────────────────
 
     private void UpdateResting()
     {
         stateTimer += Time.deltaTime;
 
-        // Even while resting, a very close sight line will rouse the dog
         if (CanSeePlayer())
         {
+            Debug.Log("[DogAI] Spotted player while resting!");
             lastKnownPlayerPos = playerTransform.position;
             EnterState(DogState.Alert);
             return;
@@ -194,6 +194,7 @@ public class DogAI : MonoBehaviour
         {
             alertBuildupTimer += Time.deltaTime;
             lastKnownPlayerPos = playerTransform.position;
+            Debug.Log("[DogAI] Sees player while patrolling — alert buildup: " + alertBuildupTimer.ToString("F1") + "s / " + timeToAlert + "s");
             if (alertBuildupTimer >= timeToAlert)
             {
                 EnterState(DogState.Alert);
@@ -221,10 +222,10 @@ public class DogAI : MonoBehaviour
             waitingAtWaypoint = true;
             stateTimer = 0f;
 
-            // Track patrol cycles; when done, go rest
             if (currentWaypointIndex == 0)
             {
                 patrolCyclesCompleted++;
+                Debug.Log("[DogAI] Completed patrol cycle " + patrolCyclesCompleted + " / " + patrolCyclesBeforeRest);
                 if (patrolCyclesCompleted >= patrolCyclesBeforeRest)
                 {
                     EnterState(DogState.ReturnToBasket);
@@ -242,6 +243,7 @@ public class DogAI : MonoBehaviour
         {
             alertBuildupTimer += Time.deltaTime;
             lastKnownPlayerPos = playerTransform.position;
+            Debug.Log("[DogAI] Sees player while suspicious — alert buildup: " + alertBuildupTimer.ToString("F1") + "s / " + timeToAlert + "s");
 
             if (alertBuildupTimer >= timeToAlert)
             {
@@ -256,6 +258,7 @@ public class DogAI : MonoBehaviour
 
         if (stateTimer >= investigateDuration)
         {
+            Debug.Log("[DogAI] Investigation timed out — returning to patrol.");
             alertBuildupTimer = 0f;
             EnterState(DogState.Patrol);
         }
@@ -274,35 +277,42 @@ public class DogAI : MonoBehaviour
         else
         {
             losePlayerTimer += Time.deltaTime;
+            Debug.Log("[DogAI] Lost sight of player — giving up in: " + (losePlayerTime - losePlayerTimer).ToString("F1") + "s");
             if (losePlayerTimer >= losePlayerTime)
             {
+                Debug.Log("[DogAI] Lost player — going suspicious at last known position.");
                 lastHeardPosition = lastKnownPlayerPos;
                 EnterState(DogState.Suspicious);
                 return;
             }
         }
 
-        if (Vector3.Distance(transform.position, playerTransform.position) <= catchDistance)
+        float distToPlayer = Vector3.Distance(transform.position, playerTransform.position);
+        if (distToPlayer <= catchDistance)
+        {
+            Debug.Log("[DogAI] Caught the player!");
             CatchPlayer();
+        }
     }
 
     private void UpdateChase() => UpdateAlert();
 
     private void UpdateReturnToBasket()
     {
-        // Still alert for player on the way home
         if (CanSeePlayer())
         {
+            Debug.Log("[DogAI] Spotted player while returning to basket — back to alert!");
             lastKnownPlayerPos = playerTransform.position;
             EnterState(DogState.Alert);
             return;
         }
 
         if (!agent.pathPending && agent.remainingDistance <= basketArrivalRadius)
+        {
+            Debug.Log("[DogAI] Arrived at basket.");
             EnterState(DogState.Resting);
+        }
     }
-
-    // ── Detection ─────────────────────────────────────────────────────────────
 
     private bool CanSeePlayer()
     {
@@ -317,7 +327,6 @@ public class DogAI : MonoBehaviour
         Vector3 dir = (playerTransform.position - transform.position).normalized;
         if (Vector3.Angle(transform.forward, dir) > viewAngle) return false;
 
-        // Raycast from the dog's head height to the player's centre
         Vector3 origin = transform.position + Vector3.up * 0.6f;
         if (Physics.Raycast(origin, dir, dist, obstructionMask)) return false;
 
@@ -326,12 +335,13 @@ public class DogAI : MonoBehaviour
 
     private void HandleNoise(Vector3 noisePos, float radius, NoiseType type)
     {
-        // Resting dogs are heavy sleepers — only very loud noises wake them
         if (CurrentState == DogState.Stunned) return;
         if (CurrentState == DogState.Resting && type != NoiseType.Sprint && type != NoiseType.Land) return;
 
         float dist = Vector3.Distance(transform.position, noisePos);
         if (dist > radius) return;
+
+        Debug.Log("[DogAI] Heard noise — type: " + type + ", distance: " + dist.ToString("F1") + ", radius: " + radius);
 
         lastHeardPosition = noisePos;
 
@@ -341,21 +351,22 @@ public class DogAI : MonoBehaviour
         if (isVeryClose || isAlreadySearching)
         {
             if (CurrentState != DogState.Alert && CurrentState != DogState.Chase)
+            {
+                Debug.Log("[DogAI] Noise too close — going straight to alert!");
                 EnterState(DogState.Alert);
+            }
         }
-        else if (CurrentState == DogState.Patrol      ||
-                 CurrentState == DogState.Resting      ||
+        else if (CurrentState == DogState.Patrol ||
+                 CurrentState == DogState.Resting ||
                  CurrentState == DogState.ReturnToBasket)
         {
             EnterState(DogState.Suspicious);
         }
     }
 
-    // ── Public API ────────────────────────────────────────────────────────────
-
-    /// <summary>Called by PlayerCombat when the player hisses at the dog.</summary>
     public void Stun(float duration)
     {
+        Debug.Log("[DogAI] Stun triggered for " + duration + "s.");
         StopAllCoroutines();
         StartCoroutine(StunRoutine(duration));
     }
@@ -381,39 +392,32 @@ public class DogAI : MonoBehaviour
             agent.isStopped = false;
     }
 
-    // ── Patrol Helpers ────────────────────────────────────────────────────────
-
     private void GoToNextWaypoint()
     {
         if (waypoints == null || waypoints.Length == 0) return;
+        Debug.Log("[DogAI] Moving to waypoint " + currentWaypointIndex);
         agent.SetDestination(waypoints[currentWaypointIndex].position);
         currentWaypointIndex = (currentWaypointIndex + 1) % waypoints.Length;
     }
 
-    // ── Gizmos ────────────────────────────────────────────────────────────────
-
     private void OnDrawGizmosSelected()
     {
-        // Vision cone
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, viewDistance);
-        Vector3 left  = Quaternion.Euler(0, -viewAngle, 0) * transform.forward;
-        Vector3 right = Quaternion.Euler(0,  viewAngle, 0) * transform.forward;
-        Gizmos.DrawRay(transform.position, left  * viewDistance);
+        Vector3 left = Quaternion.Euler(0, -viewAngle, 0) * transform.forward;
+        Vector3 right = Quaternion.Euler(0, viewAngle, 0) * transform.forward;
+        Gizmos.DrawRay(transform.position, left * viewDistance);
         Gizmos.DrawRay(transform.position, right * viewDistance);
 
-        // Catch range
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position, catchDistance);
 
-        // Basket comfort zone
         if (basket != null)
         {
             Gizmos.color = Color.cyan;
             Gizmos.DrawWireSphere(basket.position, basketArrivalRadius);
         }
 
-        // Waypoint path preview
         if (waypoints != null && waypoints.Length > 1)
         {
             Gizmos.color = Color.green;

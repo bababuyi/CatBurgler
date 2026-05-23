@@ -1,12 +1,6 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
-/// <summary>
-/// Manages the cat's hiss ability.
-/// Stuns all dogs within hissRadius and sends them retreating to their basket.
-/// Limited charges that regenerate over time, shown in HUD.
-///
-/// Key bindings: Right Mouse Button or Q
-/// </summary>
 public class PlayerCombat : MonoBehaviour
 {
     [Header("Hiss Settings")]
@@ -23,9 +17,8 @@ public class PlayerCombat : MonoBehaviour
     public AudioSource audioSource;
     public AudioClip hissClip;
 
-    // ── Public state (read by HUDController) ─────────────────────────────
     public int CurrentCharges { get; private set; }
-    public float RegenProgress { get; private set; }   // 0–1
+    public float RegenProgress { get; private set; }
 
     public event System.Action<int> OnChargesChanged;
 
@@ -44,7 +37,7 @@ public class PlayerCombat : MonoBehaviour
 
     private void HandleHissInput()
     {
-        if (Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.Q))
+        if (Keyboard.current.qKey.wasPressedThisFrame)
             TryHiss();
     }
 
@@ -60,7 +53,6 @@ public class PlayerCombat : MonoBehaviour
         if (audioSource && hissClip)
             audioSource.PlayOneShot(hissClip);
 
-        // Stun every dog in range
         Collider[] hits = Physics.OverlapSphere(transform.position, hissRadius);
         foreach (Collider hit in hits)
         {

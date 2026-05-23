@@ -1,12 +1,6 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
-/// <summary>
-/// A collectible food item inside the fridge (fish, chicken, milk carton, etc.).
-/// Bobs and rotates to draw the player's eye.
-/// Collected on trigger contact with the player.
-///
-/// SETUP: Add a Trigger Collider. Tag player as "Player".
-/// </summary>
 public class FoodItem : MonoBehaviour
 {
     [Header("Idle Animation")]
@@ -19,6 +13,7 @@ public class FoodItem : MonoBehaviour
 
     private Vector3 originPosition;
     private bool collected;
+    private bool playerInRange;
 
     private void Start()
     {
@@ -28,15 +23,24 @@ public class FoodItem : MonoBehaviour
     private void Update()
     {
         if (collected) return;
-        // Gentle hover
+
         transform.position = originPosition + Vector3.up * (Mathf.Sin(Time.time * bobSpeed) * bobHeight);
         transform.Rotate(Vector3.up, rotateSpeed * Time.deltaTime, Space.World);
+        if (playerInRange && Keyboard.current.eKey.wasPressedThisFrame)
+            Collect();
+        Debug.Log("PlayerInRange: " + playerInRange);
     }
 
     private void OnTriggerEnter(Collider other)
     {
-        if (collected || !other.CompareTag("Player")) return;
-        Collect();
+        if (other.CompareTag("Player"))
+            playerInRange = true;
+    }
+
+    private void OnTriggerExit(Collider other)
+    {
+        if (other.CompareTag("Player"))
+            playerInRange = false;
     }
 
     private void Collect()
