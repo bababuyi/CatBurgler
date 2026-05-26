@@ -8,6 +8,9 @@ public class GameManager : MonoBehaviour
     [Header("Level Settings")]
     public int totalFoodItems = 5;
 
+    [Header("References")]
+    public GrandmaAI grandma;
+
     private int collectedFood;
     private bool levelComplete;
     private Vector3 checkpointPosition;
@@ -25,6 +28,8 @@ public class GameManager : MonoBehaviour
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
+        if (grandma != null)
+            grandma.OnAllWindowsClosed += HandleAllWindowsClosed;
         DontDestroyOnLoad(gameObject);
     }
 
@@ -37,11 +42,13 @@ public class GameManager : MonoBehaviour
             OnAllFoodCollected?.Invoke();
     }
 
-    public void SetCheckpoint(Vector3 position, Quaternion rotation)
+    private void HandleAllWindowsClosed()
     {
-        checkpointPosition = position;
-        checkpointRotation = rotation;
-        hasCheckpoint = true;
+        if (!levelComplete)
+        {
+            Debug.Log("GameManager: All windows closed — cat is trapped!");
+            ReloadScene();
+        }
     }
 
     public void RespawnPlayer(GameObject player)

@@ -29,6 +29,8 @@ public class PlayerController : MonoBehaviour
 
     [Header("References")]
     public Transform orientation;
+    public InputActionReference interactAction;
+    public DogAI dogAI;
 
     [Header("Input Actions")]
     public InputActionReference moveAction;
@@ -69,6 +71,8 @@ public class PlayerController : MonoBehaviour
         jumpAction.action.Enable();
         sprintAction.action.Enable();
         crouchAction.action.Enable();
+        interactAction.action.Enable();
+        interactAction.action.performed += OnInteract;
 
         jumpAction.action.performed += OnJump;
     }
@@ -79,6 +83,8 @@ public class PlayerController : MonoBehaviour
         jumpAction.action.Disable();
         sprintAction.action.Disable();
         crouchAction.action.Disable();
+        interactAction.action.Disable();
+        interactAction.action.performed -= OnInteract;
 
         jumpAction.action.performed -= OnJump;
     }
@@ -91,7 +97,7 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
-        // Read continuous input
+        if (GetComponent<HealthScript>().IsBeingCarried) return;
         moveInput = moveAction.action.ReadValue<Vector2>();
         sprintHeld = sprintAction.action.IsPressed();
         crouchHeld = crouchAction.action.IsPressed();
@@ -231,5 +237,14 @@ public class PlayerController : MonoBehaviour
     private void OnCollisionExit(Collision collision)
     {
         IsGrounded = false;
+    }
+
+    private void OnInteract(InputAction.CallbackContext context)
+    {
+        dogAI?.TryEscape();
+
+        Collider[] nearby = Physics.OverlapSphere(transform.position, 2f);
+        foreach (Collider col in nearby)
+            col.GetComponent<FoodItem>()?.TryCollect();
     }
 }

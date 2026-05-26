@@ -28,7 +28,6 @@ public class FoodItem : MonoBehaviour
         transform.Rotate(Vector3.up, rotateSpeed * Time.deltaTime, Space.World);
         if (playerInRange && Keyboard.current.eKey.wasPressedThisFrame)
             Collect();
-        Debug.Log("PlayerInRange: " + playerInRange);
     }
 
     private void OnTriggerEnter(Collider other)
@@ -41,6 +40,21 @@ public class FoodItem : MonoBehaviour
     {
         if (other.CompareTag("Player"))
             playerInRange = false;
+    }
+
+    private void OnTriggerStay(Collider other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            if (other.GetComponent<HealthScript>()?.IsBeingCarried == true) return;
+            playerInRange = true;
+        }
+    }
+
+    public void TryCollect()
+    {
+        if (!playerInRange || collected) return;
+        Collect();
     }
 
     private void Collect()
