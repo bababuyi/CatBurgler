@@ -458,13 +458,14 @@ public class GrandmaAI : MonoBehaviour
     {
         if (windowTransforms[index] == null) return;
 
+        var blind = windowTransforms[index].GetComponent<BlindUnit>();
+        if (blind != null) { blind.Close(); return; }
+
         var window = windowTransforms[index].GetComponent<Window>();
         if (window != null) { window.Close(); return; }
 
         var curtain = windowTransforms[index].GetComponent<CurtainWindow>();
         if (curtain != null) { curtain.Close(); return; }
-
-        Debug.LogWarning($"Grandma: No window component on {windowTransforms[index].name}");
     }
 
     private void OnDrawGizmosSelected()
