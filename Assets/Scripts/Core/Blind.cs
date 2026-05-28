@@ -1,14 +1,20 @@
 ﻿using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
 
 public class BlindUnit : MonoBehaviour
 {
     [Header("Settings")]
-    [Tooltip("How long the close animation takes in seconds.")]
+    [Tooltip("How long the open/close motion takes, in seconds.")]
     public float animationDuration = 1f;
-    [Tooltip("Name of the animation clip on each slate — must match the clip name in Unity.")]
-    public string closeClipName = "Close";
+
+    [Tooltip("Closed tilt for each slat, in degrees, about the slat's LOCAL X axis. " +
+             "Flip the sign if the slats tilt the wrong way.")]
+    public float closedAngle = 75f;
+
+    [Tooltip("Only children whose name contains this are treated as slats.")]
+    public string slateNameContains = "Slate";
 
     [Header("State")]
     public bool isClosed = false;
@@ -20,16 +26,29 @@ public class BlindUnit : MonoBehaviour
     public event System.Action OnClosed;
     public event System.Action OnOpened;
 
-    private Animation[] slateAnimations;
+    private Transform[] _slats;
+    private Quaternion[] _openRotations;
+    private Coroutine _active;
 
     private void Awake()
     {
-        slateAnimations = GetComponentsInChildren<Animation>();
-        if (slateAnimations.Length == 0)
-            Debug.LogWarning($"[BlindUnit] No Animation components found on children of {gameObject.name}. " +
-                             "Make sure slates have Animation components attached.");
+        var found = new List<Transform>();
+        foreach (var t in GetComponentsInChildren<Transform>(true))
+        {
+            if (t == transform) continue;
+            if (t.name.Contains(slateNameContains)) found.Add(t);
+        }
+
+        _slats = found.ToArray();
+        _openRotations = new Quaternion[_slats.Length];
+        for (int i = 0; i < _slats.Length; i++)
+            _openRotations[i] = _slats[i].localRotation;
+
+        if (_slats.Length == 0)
+            Debug.LogWarning($"[BlindUnit] No slats found under {gameObject.name} " +
+                             $"(looking for children whose name contains '{slateNameContains}').");
         else
-            Debug.Log($"[BlindUnit] Found {slateAnimations.Length} slate animations on {gameObject.name}.");
+            Debug.Log($"[BlindUnit] Found {_slats.Length} slats on {gameObject.name}.");
     }
 
     public void Close()
@@ -37,65 +56,59 @@ public class BlindUnit : MonoBehaviour
         if (isClosed) return;
         isClosed = true;
         Debug.Log($"[BlindUnit] Closing {gameObject.name}.");
-        StartCoroutine(PlayAllAnimations(closeClipName));
+        StartMotion(true);
     }
 
     public void Open()
     {
         if (!isClosed) return;
         isClosed = false;
-        foreach (Animation anim in slateAnimations)
-        {
-            if (anim == null) continue;
-            AnimationState state = anim[closeClipName];
-            if (state == null) continue;
-            state.speed = -1f;
-            state.time = state.length;
-            anim.Play(closeClipName);
-        }
-        onWindowOpened?.Invoke();
-        OnOpened?.Invoke();
         Debug.Log($"[BlindUnit] Opening {gameObject.name}.");
+        StartMotion(false);
     }
 
     public bool CanUse() => !isClosed;
 
-    private IEnumerator PlayAllAnimations(string clipName)
+    private void StartMotion(bool closing)
     {
-        int successCount = 0;
-        foreach (Animation anim in slateAnimations)
+        if (_active != null) StopCoroutine(_active);
+        _active = StartCoroutine(RotateSlats(closing));
+    }
+
+    private IEnumerator RotateSlats(bool closing)
+    {
+        var startRots = new Quaternion[_slats.Length];
+        var targetRots = new Quaternion[_slats.Length];
+        for (int i = 0; i < _slats.Length; i++)
         {
-            if (anim == null) continue;
-            AnimationState state = anim[clipName];
-            if (state != null)
-            {
-                state.speed = 1f;
-                state.time = 0f;
-                anim.Play(clipName);
-                successCount++;
-            }
-            else
-            {
-                foreach (AnimationState s in anim)
-                {
-                    s.speed = 1f;
-                    s.time = 0f;
-                    anim.Play(s.name);
-                    successCount++;
-                    break;
-                }
-            }
+            if (_slats[i] == null) continue;
+            startRots[i] = _slats[i].localRotation;
+            targetRots[i] = closing
+                ? _openRotations[i] * Quaternion.AngleAxis(closedAngle, Vector3.right)
+                : _openRotations[i];
         }
-        if (successCount == 0)
-            Debug.LogWarning($"[BlindUnit] No clips played on {gameObject.name}. " +
-                             $"Check that clip name '{clipName}' matches the imported clip name.");
-        else
-            Debug.Log($"[BlindUnit] Playing {successCount} slate animations simultaneously.");
 
-        yield return new WaitForSeconds(animationDuration);
+        float duration = Mathf.Max(0.01f, animationDuration);
+        float t = 0f;
+        while (t < 1f)
+        {
+            t += Time.deltaTime / duration;
+            float eased = Mathf.SmoothStep(0f, 1f, t);
+            for (int i = 0; i < _slats.Length; i++)
+            {
+                if (_slats[i] == null) continue;
+                _slats[i].localRotation = Quaternion.Slerp(startRots[i], targetRots[i], eased);
+            }
+            yield return null;
+        }
 
-        onWindowClosed?.Invoke();
-        OnClosed?.Invoke();
+        for (int i = 0; i < _slats.Length; i++)
+            if (_slats[i] != null) _slats[i].localRotation = targetRots[i];
+
+        if (closing) { onWindowClosed?.Invoke(); OnClosed?.Invoke(); }
+        else { onWindowOpened?.Invoke(); OnOpened?.Invoke(); }
+
+        _active = null;
     }
 
     private void OnDrawGizmosSelected()

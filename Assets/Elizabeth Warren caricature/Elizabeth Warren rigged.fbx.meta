@@ -1123,12 +1123,17 @@ ModelImporter:
   - first:
       137: 13700010
     second: Elizabeth_Warren:teeth_top_teeth_top_teeth_top
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: phong1
+    second: {fileID: 2100000, guid: 683888f299e1dd94dbf34d50256798e5, type: 2}
   materials:
-    materialImportMode: 1
+    materialImportMode: 2
     materialName: 0
     materialSearch: 1
-    materialLocation: 0
+    materialLocation: 1
   animations:
     legacyGenerateAnimations: 4
     bakeSimulation: 0

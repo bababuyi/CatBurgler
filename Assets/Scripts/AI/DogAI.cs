@@ -5,11 +5,20 @@ using UnityEngine.AI;
 [RequireComponent(typeof(NavMeshAgent))]
 public class DogAI : MonoBehaviour
 {
+    private float _animLogTimer;
+
     public enum DogState
     {
         Resting, Patrol, Suspicious, Alert, Chase,
         ReturnToBasket, Stunned, Pinning, Carrying
     }
+
+    [Header("Animation")]
+    [Tooltip("Animator on the dog model child. Auto-found if left empty.")]
+    public Animator animator;
+
+    private static readonly int VertHash = Animator.StringToHash("Vert");
+    private static readonly int StateHash = Animator.StringToHash("State");
 
     [Header("Patrol")]
     [Tooltip("Ordered list of positions the dog walks between.")]
@@ -99,6 +108,7 @@ public class DogAI : MonoBehaviour
     private void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
+        if (animator == null) animator = GetComponentInChildren<Animator>();
 
         var player = GameObject.FindGameObjectWithTag("Player");
         if (player)
@@ -147,6 +157,7 @@ public class DogAI : MonoBehaviour
             case DogState.Carrying: UpdateCarrying(); break;
             case DogState.Stunned: break;
         }
+        UpdateAnimator();
     }
 
     private void EnterState(DogState newState)
@@ -221,6 +232,27 @@ public class DogAI : MonoBehaviour
                     agent.SetDestination(frontDoor.position);
                 Debug.Log("[DogAI] Carrying cat to front door.");
                 break;
+        }
+    }
+
+    private void UpdateAnimator()
+    {
+        if (animator == null) return;
+
+        float commanded = Mathf.Max(0.01f, agent.speed);
+        float vert = Mathf.Clamp01(agent.velocity.magnitude / commanded);
+        animator.SetFloat(VertHash, vert);
+
+        float state = agent.speed > patrolSpeed + 0.5f ? 1f : 0f;
+        animator.SetFloat(StateHash, state);
+
+        _animLogTimer += Time.deltaTime;
+        if (_animLogTimer >= 0.5f)
+        {
+            _animLogTimer = 0f;
+            float vertReadback = animator.GetFloat(VertHash);
+            float stateReadback = animator.GetFloat(StateHash);
+            Debug.Log($"[DogAI Anim] State={CurrentState} | agent.speed={agent.speed:F2} velocity={agent.velocity.magnitude:F2} | Set Vert={vert:F2} (readback {vertReadback:F2}) State={state:F0} (readback {stateReadback:F0})");
         }
     }
 

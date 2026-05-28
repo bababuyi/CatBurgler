@@ -4,8 +4,14 @@ using UnityEngine.Events;
 
 public class Window : MonoBehaviour
 {
-    [Header("Settings")]
-    public string closeClipName = "Close";
+    [Header("Target")]
+    public Transform scaleTarget;
+
+    [Header("Scale Settings")]
+    public Vector3 closedScale = Vector3.one;
+
+    [Header("Timing")]
+    public float animationDuration = 1f;
 
     [Header("State")]
     public bool isOpen = true;
@@ -16,65 +22,66 @@ public class Window : MonoBehaviour
 
     public event System.Action OnClosed;
 
-    private Animation blindAnimation;
+    private Vector3 _openScale;
+    private Coroutine _active;
 
     private void Awake()
     {
-        blindAnimation = GetComponentInChildren<Animation>();
+        if (scaleTarget == null)
+        {
+            var anim = GetComponentInChildren<Animation>();
+            scaleTarget = anim != null ? anim.transform : transform;
+        }
 
-        if (blindAnimation == null)
-            Debug.LogWarning($"[Window] No Animation component found in children of {gameObject.name}.");
+        _openScale = scaleTarget.localScale;
+        Debug.Log($"[Window] {gameObject.name}: scaling '{scaleTarget.name}', " +
+                  $"open={_openScale}, closed={closedScale}.");
     }
 
     public void Close()
     {
         if (!isOpen) return;
         isOpen = false;
-        StartCoroutine(PlayAndNotify());
+        Debug.Log($"[Window] Closing {gameObject.name}.");
+        StartMotion(closedScale, true);
     }
 
     public void Open()
     {
-        if (isOpen || blindAnimation == null) return;
+        if (isOpen) return;
         isOpen = true;
-        AnimationState state = blindAnimation[closeClipName];
-        if (state == null) return;
-        state.speed = -1f;
-        state.time = state.length;
-        blindAnimation.Play(closeClipName);
-        onWindowOpened?.Invoke();
+        Debug.Log($"[Window] Opening {gameObject.name}.");
+        StartMotion(_openScale, false);
     }
 
     public bool CanUse() => isOpen;
 
-    private IEnumerator PlayAndNotify()
+    private void StartMotion(Vector3 target, bool closing)
     {
-        if (blindAnimation != null)
+        if (_active != null) StopCoroutine(_active);
+        _active = StartCoroutine(ScaleTo(target, closing));
+    }
+
+    private IEnumerator ScaleTo(Vector3 target, bool closing)
+    {
+        Vector3 start = scaleTarget.localScale;
+        float duration = Mathf.Max(0.01f, animationDuration);
+        float t = 0f;
+
+        while (t < 1f)
         {
-            AnimationState state = blindAnimation[closeClipName];
-            if (state != null)
-            {
-                state.speed = 1f;
-                state.time = 0f;
-                blindAnimation.Play(closeClipName);
-                yield return new WaitForSeconds(state.length);
-            }
-            else
-            {
-                foreach (AnimationState s in blindAnimation)
-                {
-                    s.speed = 1f;
-                    s.time = 0f;
-                    blindAnimation.Play(s.name);
-                    yield return new WaitForSeconds(s.length);
-                    break;
-                }
-            }
+            t += Time.deltaTime / duration;
+            float e = Mathf.SmoothStep(0f, 1f, t);
+            scaleTarget.localScale = Vector3.Lerp(start, target, e);
+            yield return null;
         }
 
-        onWindowClosed?.Invoke();
-        OnClosed?.Invoke();
-        Debug.Log($"[Window] {gameObject.name} closed.");
+        scaleTarget.localScale = target;
+
+        if (closing) { onWindowClosed?.Invoke(); OnClosed?.Invoke(); }
+        else { onWindowOpened?.Invoke(); }
+
+        _active = null;
     }
 
     private void OnDrawGizmosSelected()
