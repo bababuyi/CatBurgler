@@ -23,6 +23,7 @@ public class GameManager : MonoBehaviour
     public event System.Action<int, int> OnFoodCollected;
     public event System.Action OnAllFoodCollected;
     public event System.Action OnLevelComplete;
+    public bool HasCollectedAnyFood => collectedFood > 0;
 
     private void Awake()
     {
@@ -73,6 +74,12 @@ public class GameManager : MonoBehaviour
         levelComplete = true;
         Time.timeScale = 0f;
         OnLevelComplete?.Invoke();
+    }
+
+    public void TriggerEscape()
+    {
+        TriggerLevelComplete();
+        FindObjectOfType<WinMenu>()?.ShowWin();
     }
 
     public void ReloadScene() => SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);

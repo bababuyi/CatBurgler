@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -10,7 +11,7 @@ public class DogAI : MonoBehaviour
     public enum DogState
     {
         Resting, Patrol, Suspicious, Alert, Chase,
-        ReturnToBasket, Stunned, Pinning, Carrying
+        ReturnToBasket, Stunned, Pinning, Carrying, Escorting
     }
 
     [Header("Animation")]
@@ -68,6 +69,22 @@ public class DogAI : MonoBehaviour
     [Tooltip("Seconds of continuous eye contact before the dog goes to alert.")]
     public float timeToAlert = 1.5f;
 
+    [Header("Search Sweep")]
+    public float sweepRadius = 3f;
+    [Tooltip("Extra positions checked during Suspicious investigation.")]
+    public int sweepPointCount = 3;
+    [Tooltip("Seconds paused at each sweep point.")]
+    public float sweepPauseTime = 1.2f;
+    [Tooltip("Chance per waypoint arrival of a brief patrol sniff (0–1).")]
+    [Range(0f, 1f)]
+    public float patrolSweepChance = 0.12f;
+
+    [Header("Escalation")]
+    public float escalationViewAngleIncrease = 5f;
+    public float escalationTimeToAlertDecrease = 0.2f;
+    public float escalationLosePlayerTimeDecrease = 0.5f;
+    public int maxEscalationSteps = 4;
+
     [Header("Pinning")]
     [Tooltip("Seconds after catching cat before first bite.")]
     public float firstBiteDelay = 0.4f;
@@ -84,6 +101,12 @@ public class DogAI : MonoBehaviour
     [Tooltip("The front door — where the cat gets thrown out.")]
     public Transform frontDoor;
 
+    [Header("Escort")]
+    [Tooltip("How far behind grandma the dog walks.")]
+    public float escortOffset = 1.5f;
+    [Tooltip("Speed while escorting — should be slightly above grandma's walk speed.")]
+    public float escortSpeed = 1.4f;
+
     [Header("References")]
     [Tooltip("Assign GrandmaAI so the dog can alert her when it barks.")]
     public GrandmaAI grandmaAI;
@@ -93,7 +116,7 @@ public class DogAI : MonoBehaviour
     private NavMeshAgent agent;
     private Transform playerTransform;
     private HealthScript playerHealth;
-
+    private Transform escortTarget;
     private int currentWaypointIndex;
     private int patrolCyclesCompleted;
     private float stateTimer;
@@ -104,6 +127,11 @@ public class DogAI : MonoBehaviour
     private Vector3 lastHeardPosition;
     private float currentRestDuration;
     private int escapeCounter;
+    private Queue<Vector3> sweepQueue = new Queue<Vector3>();
+    private bool generatedSweepPoints;
+    private bool pausingAtSweepPoint;
+    private float sweepPauseTimer;
+    private int escalationLevel;
 
     private void Awake()
     {
@@ -155,6 +183,7 @@ public class DogAI : MonoBehaviour
             case DogState.ReturnToBasket: UpdateReturnToBasket(); break;
             case DogState.Pinning: UpdatePinning(); break;
             case DogState.Carrying: UpdateCarrying(); break;
+            case DogState.Escorting: UpdateEscorting(); break;
             case DogState.Stunned: break;
         }
         UpdateAnimator();
@@ -163,6 +192,7 @@ public class DogAI : MonoBehaviour
     private void EnterState(DogState newState)
     {
         Debug.Log("[DogAI] State: " + CurrentState + " -> " + newState);
+        DogState previousState = CurrentState;
         CurrentState = newState;
         stateTimer = 0f;
 
@@ -173,7 +203,7 @@ public class DogAI : MonoBehaviour
                 currentRestDuration = restDuration + Random.Range(-restVariance, restVariance);
                 currentRestDuration = Mathf.Max(2f, currentRestDuration);
                 Debug.Log("[DogAI] Resting for " + currentRestDuration.ToString("F1") + "s.");
-                break;
+            break;
 
             case DogState.Patrol:
                 agent.isStopped = false;
@@ -186,37 +216,39 @@ public class DogAI : MonoBehaviour
                 agent.speed = suspiciousSpeed;
                 agent.SetDestination(lastHeardPosition);
                 alertBuildupTimer = 0f;
+                generatedSweepPoints = false;
+                sweepQueue.Clear();
+                pausingAtSweepPoint = false;
                 Debug.Log("[DogAI] Suspicious — investigating at " + lastHeardPosition);
-                break;
+            break;
 
             case DogState.Alert:
             case DogState.Chase:
                 agent.isStopped = false;
                 agent.speed = chaseSpeed;
                 losePlayerTimer = 0f;
-                if (grandmaAI != null)
+                if (grandmaAI != null && previousState != DogState.Alert && previousState != DogState.Chase)
                     grandmaAI.AlertFromBark(transform.position);
-                Debug.Log("[DogAI] ALERT — chasing player!");
-                break;
+            break;
 
             case DogState.ReturnToBasket:
                 agent.isStopped = false;
                 agent.speed = patrolSpeed;
                 agent.SetDestination(basket.position);
                 Debug.Log("[DogAI] Returning to basket.");
-                break;
+            break;
 
             case DogState.Stunned:
                 agent.isStopped = true;
                 Debug.Log("[DogAI] Stunned by hiss!");
-                break;
+            break;
 
             case DogState.Pinning:
                 agent.isStopped = true;
                 escapeCounter = escapePressesNeeded;
                 Debug.Log("[DogAI] Pinning cat!");
                 StartCoroutine(PinRoutine());
-                break;
+            break;
 
             case DogState.Carrying:
                 agent.isStopped = false;
@@ -231,7 +263,13 @@ public class DogAI : MonoBehaviour
                 if (frontDoor != null)
                     agent.SetDestination(frontDoor.position);
                 Debug.Log("[DogAI] Carrying cat to front door.");
-                break;
+            break;
+
+            case DogState.Escorting:
+                agent.isStopped = false;
+                agent.speed = escortSpeed;
+                Debug.Log("[DogAI] Escorting grandma.");
+            break;
         }
     }
 
@@ -254,6 +292,25 @@ public class DogAI : MonoBehaviour
             float stateReadback = animator.GetFloat(StateHash);
             Debug.Log($"[DogAI Anim] State={CurrentState} | agent.speed={agent.speed:F2} velocity={agent.velocity.magnitude:F2} | Set Vert={vert:F2} (readback {vertReadback:F2}) State={state:F0} (readback {stateReadback:F0})");
         }
+    }
+
+    private void UpdateEscorting()
+    {
+        if (escortTarget == null)
+        {
+            EnterState(DogState.ReturnToBasket);
+            return;
+        }
+
+        if (CanSeePlayer())
+        {
+            lastKnownPlayerPos = playerTransform.position;
+            EnterState(DogState.Alert);
+            return;
+        }
+
+        Vector3 behindGrandma = escortTarget.position - escortTarget.forward * escortOffset;
+        agent.SetDestination(behindGrandma);
     }
 
     private void UpdateResting()
@@ -293,6 +350,28 @@ public class DogAI : MonoBehaviour
 
         if (waitingAtWaypoint)
         {
+            if (sweepQueue.Count > 0)
+            {
+                if (pausingAtSweepPoint)
+                {
+                    sweepPauseTimer += Time.deltaTime;
+                    if (sweepPauseTimer >= sweepPauseTime)
+                    {
+                        pausingAtSweepPoint = false;
+                        sweepQueue.Clear();
+                        waitingAtWaypoint = false;
+                        GoToNextWaypoint();
+                    }
+                    return;
+                }
+                if (!agent.pathPending && agent.remainingDistance < 0.4f)
+                {
+                    pausingAtSweepPoint = true;
+                    sweepPauseTimer = 0f;
+                }
+                return;
+            }
+
             stateTimer += Time.deltaTime;
             if (stateTimer >= waypointWaitTime)
             {
@@ -306,6 +385,14 @@ public class DogAI : MonoBehaviour
         {
             waitingAtWaypoint = true;
             stateTimer = 0f;
+            pausingAtSweepPoint = false;
+
+            if (Random.value < patrolSweepChance)
+            {
+                QueueSweepPoints(transform.position, sweepRadius * 0.5f, 1);
+                if (sweepQueue.Count > 0)
+                    agent.SetDestination(sweepQueue.Dequeue());
+            }
 
             if (currentWaypointIndex == 0)
             {
@@ -329,6 +416,7 @@ public class DogAI : MonoBehaviour
             lastKnownPlayerPos = playerTransform.position;
             if (alertBuildupTimer >= timeToAlert)
             {
+                sweepQueue.Clear();
                 EnterState(DogState.Alert);
                 return;
             }
@@ -340,8 +428,40 @@ public class DogAI : MonoBehaviour
 
         if (stateTimer >= investigateDuration)
         {
+            sweepQueue.Clear();
             alertBuildupTimer = 0f;
             EnterState(DogState.Patrol);
+            return;
+        }
+
+        if (sweepQueue.Count > 0)
+        {
+            if (pausingAtSweepPoint)
+            {
+                sweepPauseTimer += Time.deltaTime;
+                if (sweepPauseTimer >= sweepPauseTime)
+                {
+                    pausingAtSweepPoint = false;
+                    if (sweepQueue.Count > 0)
+                        agent.SetDestination(sweepQueue.Dequeue());
+                }
+                return;
+            }
+            if (!agent.pathPending && agent.remainingDistance < 0.4f)
+            {
+                pausingAtSweepPoint = true;
+                sweepPauseTimer = 0f;
+            }
+            return;
+        }
+
+        if (!generatedSweepPoints && !agent.pathPending && agent.remainingDistance < 0.4f)
+        {
+            generatedSweepPoints = true;
+            QueueSweepPoints(lastHeardPosition, sweepRadius, sweepPointCount);
+            if (sweepQueue.Count > 0)
+                stateTimer = 0;
+                agent.SetDestination(sweepQueue.Dequeue());
         }
     }
 
@@ -352,24 +472,27 @@ public class DogAI : MonoBehaviour
         if (CanSeePlayer())
         {
             lastKnownPlayerPos = playerTransform.position;
-            agent.SetDestination(lastKnownPlayerPos);
             losePlayerTimer = 0f;
         }
         else
         {
-            losePlayerTimer += Time.deltaTime;
-            if (losePlayerTimer >= losePlayerTime)
+            float distToLastKnown = Vector3.Distance(transform.position, lastKnownPlayerPos);
+            
+            if (distToLastKnown < 1.5f)
             {
-                Debug.Log("[DogAI] Lost player — checking last known position.");
-                lastHeardPosition = lastKnownPlayerPos;
-                agent.SetDestination(lastKnownPlayerPos);
-                EnterState(DogState.Suspicious);
-                return;
+                losePlayerTimer += Time.deltaTime;
+                if (losePlayerTimer >= losePlayerTime)
+                {
+                    lastHeardPosition = lastKnownPlayerPos;
+                    EnterState(DogState.Suspicious);
+                    return;
+                }
             }
         }
 
-        float distToPlayer = Vector3.Distance(transform.position, playerTransform.position);
-        if (distToPlayer <= catchDistance)
+        agent.SetDestination(lastKnownPlayerPos);
+
+        if (Vector3.Distance(transform.position, playerTransform.position) <= catchDistance)
             EnterState(DogState.Pinning);
     }
 
@@ -442,7 +565,34 @@ public class DogAI : MonoBehaviour
         yield return new WaitForSeconds(shakeDelay);
 
         Debug.Log("[DogAI] Dog releases cat.");
+        lastKnownPlayerPos = playerTransform != null ? playerTransform.position : transform.position;
+        losePlayerTimer = 0f;
         EnterState(DogState.Alert);
+    }
+
+    private void QueueSweepPoints(Vector3 center, float radius, int count)
+    {
+        if (NavMesh.SamplePosition(center, out NavMeshHit centerHit, 3f, NavMesh.AllAreas))
+            center = centerHit.position;
+
+        for (int i = 0; i < count; i++)
+        {
+            Vector2 rand = Random.insideUnitCircle.normalized * Random.Range(radius * 0.4f, radius);
+            Vector3 candidate = center + new Vector3(rand.x, 0f, rand.y);
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, radius * 1.5f, NavMesh.AllAreas))
+                sweepQueue.Enqueue(hit.position);
+        }
+        Debug.Log($"[DogAI] Sweep: generated {sweepQueue.Count}/{count} points around {center}");
+    }
+
+    private void Escalate()
+    {
+        if (escalationLevel >= maxEscalationSteps) return;
+        escalationLevel++;
+        viewAngle = Mathf.Min(viewAngle + escalationViewAngleIncrease, 120f);
+        timeToAlert = Mathf.Max(timeToAlert - escalationTimeToAlertDecrease, 0.3f);
+        losePlayerTime = Mathf.Max(losePlayerTime - escalationLosePlayerTimeDecrease, 1.5f);
+        Debug.Log($"[DogAI] Escalated to level {escalationLevel} — viewAngle={viewAngle:F0} timeToAlert={timeToAlert:F1} losePlayerTime={losePlayerTime:F1}");
     }
 
     public void TryEscape()
@@ -455,6 +605,7 @@ public class DogAI : MonoBehaviour
         if (escapeCounter <= 0)
         {
             Debug.Log("[DogAI] Cat escaped the pin!");
+            Escalate();
             StopAllCoroutines();
             EnterState(DogState.Alert);
         }
@@ -463,18 +614,39 @@ public class DogAI : MonoBehaviour
     public void Stun(float duration)
     {
         if (CurrentState == DogState.Carrying) return;
+        Escalate();
         StopAllCoroutines();
         StartCoroutine(StunRoutine(duration));
     }
 
     public void AlertFromGrandma(Vector3 catPosition)
     {
-        if (CurrentState == DogState.Stunned || CurrentState == DogState.Carrying) return;
+        if (CurrentState == DogState.Stunned ||
+            CurrentState == DogState.Carrying ||
+            CurrentState == DogState.Pinning) return;
 
         lastKnownPlayerPos = catPosition;
         lastHeardPosition = catPosition;
         EnterState(DogState.Alert);
-        Debug.Log("[DogAI] Grandma called — rushing to cat's position!");
+    }
+
+    public void StartEscort(Transform target)
+    {
+        if (CurrentState == DogState.Stunned ||
+            CurrentState == DogState.Carrying ||
+            CurrentState == DogState.Pinning ||
+            CurrentState == DogState.Alert ||
+            CurrentState == DogState.Chase) return;
+
+        escortTarget = target;
+        EnterState(DogState.Escorting);
+    }
+
+    public void StopEscort()
+    {
+        if (CurrentState != DogState.Escorting) return;
+        escortTarget = null;
+        EnterState(DogState.ReturnToBasket);
     }
 
     private IEnumerator StunRoutine(float duration)
@@ -492,14 +664,20 @@ public class DogAI : MonoBehaviour
         float dist = Vector3.Distance(transform.position, playerTransform.position);
         float range = (CurrentState == DogState.Alert || CurrentState == DogState.Chase)
             ? alertViewDistance : viewDistance;
-
         if (dist > range) return false;
 
-        Vector3 dir = (playerTransform.position - transform.position).normalized;
+        Vector3 origin = transform.position + Vector3.up * 0.8f;
+        Vector3 target = playerTransform.position + Vector3.up * 0.3f;
+        Vector3 dir = (target - origin).normalized;
+        float castDist = Vector3.Distance(origin, target);
+
         if (Vector3.Angle(transform.forward, dir) > viewAngle) return false;
 
-        Vector3 origin = transform.position + Vector3.up * 0.6f;
-        if (Physics.Raycast(origin, dir, dist, obstructionMask)) return false;
+        Debug.DrawRay(origin, dir * castDist, Color.red, 0.1f);
+        if (Physics.Raycast(origin, dir, out RaycastHit hit, castDist, obstructionMask))
+        {
+            return false;
+        }
 
         return true;
     }
@@ -516,7 +694,7 @@ public class DogAI : MonoBehaviour
 
         lastHeardPosition = noisePos;
 
-        bool isVeryClose = dist <= alertSoundRadius;
+        bool isVeryClose = dist <= alertSoundRadius && (type == NoiseType.Sprint || type == NoiseType.Land || type == NoiseType.ObjectKnocked);
         bool isAlreadySearching = CurrentState == DogState.Alert || CurrentState == DogState.Chase;
 
         if (isVeryClose || isAlreadySearching)

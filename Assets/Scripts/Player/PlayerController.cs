@@ -4,13 +4,22 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerController : MonoBehaviour
 {
+    [Header("Ground Check")]
+    [Tooltip("Distance below collider bottom to consider grounded. Small positive value.")]
+    public float groundCheckDistance = 0.15f;
+    public LayerMask groundMask = ~0;
+
     [Header("Movement Speeds")]
     public float walkSpeed = 4f;
     public float sprintSpeed = 8f;
     public float crouchSpeed = 2f;
 
     [Header("Jump")]
-    public float jumpForce = 5f;
+    [Tooltip("Extra upward force applied each second while jump is held (variable height).")]
+    public float jumpHoldForce = 22f;
+    [Tooltip("Maximum seconds of hold-boost after pressing jump.")]
+    public float maxJumpHoldTime = 0.25f;
+    public float jumpForce = 7.5f;
     public float jumpCooldown = 0.3f;
     public float airMultiplier = 0.4f;
 
@@ -48,6 +57,9 @@ public class PlayerController : MonoBehaviour
 
     private Vector2 moveInput;
     private bool jumpPressed;
+    private bool jumpHeld;
+    private bool isJumping;
+    private float jumpHoldTimer;
     private bool sprintHeld;
     private bool crouchHeld;
 
@@ -101,7 +113,9 @@ public class PlayerController : MonoBehaviour
         moveInput = moveAction.action.ReadValue<Vector2>();
         sprintHeld = sprintAction.action.IsPressed();
         crouchHeld = crouchAction.action.IsPressed();
+        jumpHeld = jumpAction.action.IsPressed();
 
+        CheckGrounded();
         HandleCrouch();
         HandleDrag();
         SpeedControl();
@@ -112,6 +126,7 @@ public class PlayerController : MonoBehaviour
     private void FixedUpdate()
     {
         MovePlayer();
+        HandleVariableJumpHeight();
     }
 
     private void MovePlayer()
@@ -145,17 +160,43 @@ public class PlayerController : MonoBehaviour
         rb.linearDamping = IsGrounded ? groundDrag : 0f;
     }
 
+    private void CheckGrounded()
+    {
+        if (col == null) return;
+        Vector3 origin = transform.position + Vector3.up * 0.05f;
+        float distance = 0.05f + groundCheckDistance;
+        IsGrounded = Physics.Raycast(
+            origin, Vector3.down, distance, groundMask, QueryTriggerInteraction.Ignore);
+    }
+
     private void OnJump(InputAction.CallbackContext context)
     {
         if (readyToJump && IsGrounded)
         {
             readyToJump = false;
+            isJumping = true;
+            jumpHoldTimer = 0f;
             lastGroundedY = transform.position.y;
 
             rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
             rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
 
             Invoke(nameof(ResetJump), jumpCooldown);
+        }
+    }
+
+    private void HandleVariableJumpHeight()
+    {
+        if (!isJumping) return;
+
+        if (jumpHeld && jumpHoldTimer < maxJumpHoldTime && rb.linearVelocity.y > 0f)
+        {
+            jumpHoldTimer += Time.fixedDeltaTime;
+            rb.AddForce(Vector3.up * jumpHoldForce, ForceMode.Force);
+        }
+        else
+        {
+            isJumping = false;
         }
     }
 
@@ -226,7 +267,7 @@ public class PlayerController : MonoBehaviour
     {
         foreach (ContactPoint contact in collision.contacts)
         {
-            if (contact.point.y < transform.position.y - 0.05f)
+            if (Vector3.Dot(contact.normal, Vector3.up) > 0.7f)
             {
                 IsGrounded = true;
                 return;

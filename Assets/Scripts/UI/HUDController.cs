@@ -2,17 +2,6 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
-/// <summary>
-/// Manages all HUD elements by listening to game events.
-/// Uses event subscriptions rather than polling — no Update() overhead.
-///
-/// CANVAS SETUP:
-///   - healthIcons[]     : array of heart/paw Image components
-///   - foodCounterText   : "Food: 0 / 5" TMP label
-///   - hissChargeIcons[] : array of Image components for hiss charges
-///   - hissRegenBar      : a fill Image showing regen progress (filled = Image)
-///   - allFoodBanner     : brief "All food collected!" panel (auto-hides)
-/// </summary>
 public class HUDController : MonoBehaviour
 {
     [Header("Health")]
@@ -37,7 +26,6 @@ public class HUDController : MonoBehaviour
         playerHealth  = FindObjectOfType<HealthScript>();
         playerCombat  = FindObjectOfType<PlayerCombat>();
 
-        // Subscribe to events
         if (playerHealth != null) playerHealth.OnHealthChanged += UpdateHealth;
         if (playerCombat != null) playerCombat.OnChargesChanged += UpdateHissCharges;
         if (gm != null)
@@ -46,7 +34,6 @@ public class HUDController : MonoBehaviour
             gm.OnAllFoodCollected += ShowAllFoodBanner;
         }
 
-        // Set initial state
         if (gm != null) UpdateFoodCounter(gm.CollectedFood, gm.totalFoodItems);
         if (playerCombat != null) UpdateHissCharges(playerCombat.CurrentCharges);
         if (playerHealth != null) UpdateHealth(playerHealth.CurrentHealth, playerHealth.CurrentHealth);
@@ -67,12 +54,15 @@ public class HUDController : MonoBehaviour
 
     private void Update()
     {
-        // Regen bar needs per-frame update since it's a continuous fill
         if (hissRegenBar != null && playerCombat != null)
-            hissRegenBar.fillAmount = playerCombat.RegenProgress;
+        {
+            bool isRegening = playerCombat.CurrentCharges < playerCombat.maxHissCharges;
+            if (hissRegenBar.gameObject.activeSelf != isRegening)
+                hissRegenBar.gameObject.SetActive(isRegening);
+            if (isRegening)
+                hissRegenBar.fillAmount = playerCombat.RegenProgress;
+        }
     }
-
-    // ── Event Handlers ────────────────────────────────────────────────────────
 
     private void UpdateHealth(float current, float max)
     {

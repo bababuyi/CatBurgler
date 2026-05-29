@@ -1,15 +1,5 @@
 using UnityEngine;
 
-/// <summary>
-/// The cat's bed — the level exit.
-/// Stays locked (visually and functionally) until all food items are collected.
-/// Triggers the win condition when the player steps into it.
-///
-/// SETUP:
-///   - Add a Trigger Collider.
-///   - Assign lockedVisual (e.g., a padlock particle or dim glow) and
-///     unlockedVisual (e.g., a warm glowing bed) in the inspector.
-/// </summary>
 public class LevelExit : MonoBehaviour
 {
     [Header("Visuals")]

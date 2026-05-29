@@ -24,15 +24,15 @@ public class PlayerCombat : MonoBehaviour
 
     private float regenTimer;
 
-    private void Start()
-    {
-        CurrentCharges = maxHissCharges;
-    }
-
     private void Update()
     {
         HandleHissInput();
         TickRegeneration();
+    }
+
+    private void Awake()
+    {
+        CurrentCharges = maxHissCharges;
     }
 
     private void HandleHissInput()

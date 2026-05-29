@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -43,6 +44,10 @@ public class GrandmaAI : MonoBehaviour
     public float viewAngle = 45f;
     public LayerMask obstructionMask;
 
+    [Header("Vision Buildup")]
+    [Tooltip("Seconds grandma must continuously see the cat before screaming.")]
+    public float spotBuildupThreshold = 0.8f;
+
     [Header("Noise Detection")]
     [Tooltip("Only very loud noises (radius of the noise must exceed this to alert her).")]
     public float loudNoiseThreshold = 8f;
@@ -61,6 +66,13 @@ public class GrandmaAI : MonoBehaviour
     [Tooltip("How long she looks around at the bark location before giving up.")]
     public float cautiousLookDuration = 5f;
 
+    [Tooltip("Room centres grandma may check after a dog bark.")]
+    public Transform[] roomCheckPoints;
+    [Tooltip("How many of the nearest rooms she checks.")]
+    public int cautiousRoomChecks = 2;
+    [Tooltip("Seconds she pauses at each room check point.")]
+    public float cautiousRoomPauseTime = 2f;
+
     [Header("Carrying")]
     [Tooltip("Where the cat is parented when she carries it — e.g. her hand bone.")]
     public Transform handTransform;
@@ -78,22 +90,23 @@ public class GrandmaAI : MonoBehaviour
     private Transform playerTransform;
     private Rigidbody playerRigidbody;
     private HealthScript playerHealth;
-
     private float tvTimer;
     private float waterTimer;
     private float windowTimer;
     private bool atWindow;
     private int currentWindowIndex;
-
     private float kickTimer;
-
     private bool isSpottedRoutineRunning;
-
     private GrandmaState stateBeforeInterruption;
-
     private Vector3 barkPosition;
     private float cautiousTimer;
     private bool arrivedAtBarkPos;
+    private Queue<Vector3> cautiousCheckQueue = new Queue<Vector3>();
+    private bool headingToRoomCheck;
+    private bool pausingAtCheckPoint;
+    private float checkPointPauseTimer;
+    private float spotBuildupTimer;
+    private Vector3 lastSpottedPosition;
 
     private void Awake()
     {
@@ -133,10 +146,41 @@ public class GrandmaAI : MonoBehaviour
                              currentState == GrandmaState.Fleeing ||
                              currentState == GrandmaState.Carrying;
 
-        if (!visionBlocked && CanSeePlayer())
+        if (!visionBlocked)
         {
-            EnterSpottedState();
-            return;
+            if (CanSeePlayer())
+            {
+                spotBuildupTimer += Time.deltaTime;
+                lastSpottedPosition = playerTransform.position;
+                if (spotBuildupTimer >= spotBuildupThreshold)
+                {
+                    spotBuildupTimer = 0f;
+                    EnterSpottedState();
+                    return;
+                }
+            }
+            else if (spotBuildupTimer > 0.15f)
+            {
+                Debug.Log("Grandma: Was that a cat?");
+                spotBuildupTimer = 0f;
+                if (currentState != GrandmaState.Cautious)
+                {
+                    stateBeforeInterruption = currentState;
+                    arrivedAtBarkPos = false;
+                    headingToRoomCheck = false;
+                    cautiousCheckQueue.Clear();
+                    cautiousTimer = 0f;
+                    pausingAtCheckPoint = false;
+                    currentState = GrandmaState.Cautious;
+                    agent.isStopped = false;
+                    agent.speed = walkSpeed;
+                    agent.SetDestination(lastSpottedPosition);
+                }
+            }
+            else
+            {
+                spotBuildupTimer = Mathf.Max(0f, spotBuildupTimer - Time.deltaTime);
+            }
         }
 
         switch (currentState)
@@ -176,6 +220,7 @@ public class GrandmaAI : MonoBehaviour
                 currentWindowIndex = 0;
                 agent.SetDestination(windowTransforms[0].position);
                 currentState = GrandmaState.ClosingWindows;
+                dogAI?.StartEscort(transform);
                 Debug.Log("Grandma: Going to close the windows.");
             }
         }
@@ -306,6 +351,7 @@ public class GrandmaAI : MonoBehaviour
             atWindow = false;
             agent.SetDestination(windowTransforms[currentWindowIndex].position);
             currentState = GrandmaState.ClosingWindows;
+            dogAI?.StartEscort(transform);
         }
         else if (stateBeforeInterruption == GrandmaState.GetWater)
         {
@@ -330,17 +376,53 @@ public class GrandmaAI : MonoBehaviour
             {
                 arrivedAtBarkPos = true;
                 cautiousTimer = 0f;
-                Debug.Log("Grandma: Arrived at bark location. Looking around...");
+                Debug.Log("Grandma: Arrived. Looking around...");
             }
             return;
         }
 
         cautiousTimer += Time.deltaTime;
-        if (cautiousTimer >= cautiousLookDuration)
+        if (cautiousTimer < cautiousLookDuration) return;
+
+        if (!headingToRoomCheck && cautiousCheckQueue.Count > 0)
         {
-            Debug.Log("Grandma: Nothing here. Going back to what I was doing.");
-            ResumeAfterCautious();
+            headingToRoomCheck = true;
+            agent.SetDestination(cautiousCheckQueue.Dequeue());
+            return;
         }
+
+        if (headingToRoomCheck)
+        {
+            if (pausingAtCheckPoint)
+            {
+                checkPointPauseTimer += Time.deltaTime;
+                if (checkPointPauseTimer >= cautiousRoomPauseTime)
+                {
+                    pausingAtCheckPoint = false;
+                    if (cautiousCheckQueue.Count > 0)
+                    {
+                        agent.SetDestination(cautiousCheckQueue.Dequeue());
+                    }
+                    else
+                    {
+                        Debug.Log("Grandma: Nothing here. Going back to what I was doing.");
+                        headingToRoomCheck = false;
+                        ResumeAfterCautious();
+                    }
+                }
+                return;
+            }
+
+            if (!agent.pathPending && agent.remainingDistance < 0.4f)
+            {
+                pausingAtCheckPoint = true;
+                checkPointPauseTimer = 0f;
+            }
+            return;
+        }
+
+        Debug.Log("Grandma: Nothing here. Going back to what I was doing.");
+        ResumeAfterCautious();
     }
 
     private void ResumeAfterCautious()
@@ -360,6 +442,7 @@ public class GrandmaAI : MonoBehaviour
                 atWindow = false;
                 if (currentWindowIndex < windowTransforms.Length)
                     agent.SetDestination(windowTransforms[currentWindowIndex].position);
+                dogAI?.StartEscort(transform);
                 break;
             default:
                 agent.isStopped = true;
@@ -416,6 +499,23 @@ public class GrandmaAI : MonoBehaviour
         barkPosition = barkPos;
         arrivedAtBarkPos = false;
         cautiousTimer = 0f;
+        headingToRoomCheck = false;
+        pausingAtCheckPoint = false;
+        cautiousCheckQueue.Clear();
+
+        if (roomCheckPoints != null && roomCheckPoints.Length > 0)
+        {
+            var candidates = new List<Transform>(roomCheckPoints);
+            candidates.RemoveAll(t => t == null);
+            candidates.Sort((a, b) =>
+                Vector3.Distance(a.position, barkPos)
+                .CompareTo(Vector3.Distance(b.position, barkPos)));
+
+            int count = Mathf.Min(cautiousRoomChecks, candidates.Count);
+            for (int i = 0; i < count; i++)
+                cautiousCheckQueue.Enqueue(candidates[i].position);
+        }
+
         currentState = GrandmaState.Cautious;
         agent.isStopped = false;
         agent.speed = walkSpeed;
@@ -445,11 +545,18 @@ public class GrandmaAI : MonoBehaviour
         float dist = Vector3.Distance(transform.position, playerTransform.position);
         if (dist > viewDistance) return false;
 
-        Vector3 dir = (playerTransform.position - transform.position).normalized;
+        Vector3 origin = transform.position + Vector3.up * 1.4f;
+        Vector3 target = playerTransform.position + Vector3.up * 0.3f;
+        Vector3 dir = (target - origin).normalized;
+        float castDist = Vector3.Distance(origin, target);
+
         if (Vector3.Angle(transform.forward, dir) > viewAngle) return false;
 
-        Vector3 origin = transform.position + Vector3.up * 1.4f;
-        if (Physics.Raycast(origin, dir, dist, obstructionMask)) return false;
+        Debug.DrawRay(origin, dir * castDist, Color.red, 0.1f);
+        if (Physics.Raycast(origin, dir, out RaycastHit hit, castDist, obstructionMask))
+        {
+            return false;
+        }
 
         return true;
     }
