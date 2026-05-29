@@ -8,7 +8,6 @@ public class MainMenu : MonoBehaviour
 {
     private void Start()
     {
-        // Always reset timescale when returning to menu
         Time.timeScale = 1f;
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;

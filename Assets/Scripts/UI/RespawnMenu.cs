@@ -1,9 +1,5 @@
 using UnityEngine;
 
-/// <summary>
-/// Shown when the player dies. Pauses the game and offers Retry or Main Menu.
-/// Called by HealthScript.OnDeath via the Show() method.
-/// </summary>
 public class RespawnMenu : MonoBehaviour
 {
     public GameObject respawnPanel;

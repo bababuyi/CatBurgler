@@ -24,6 +24,7 @@ public class HealthScript : MonoBehaviour
     private void Start()
     {
         respawnMenu = FindObjectOfType<RespawnMenu>();
+        if (respawnMenu != null) OnDeath += respawnMenu.Show;
     }
 
     public void ResetHealth()

@@ -1,9 +1,5 @@
 using UnityEngine;
 
-/// <summary>
-/// Shown when the player reaches the cat bed with all food collected.
-/// Called by LevelExit via ShowWin().
-/// </summary>
 public class WinMenu : MonoBehaviour
 {
     public GameObject winPanel;
@@ -20,6 +16,11 @@ public class WinMenu : MonoBehaviour
         Cursor.visible = true;
     }
 
+    public void Retry()
+    {
+        Time.timeScale = 1f;
+        GameManager.Instance?.LoadScene(1);
+    }
     public void MainMenu() => GameManager.Instance?.LoadScene(0);
-    public void Quit()     => GameManager.Instance?.QuitGame();
+    public void Quit() => GameManager.Instance?.QuitGame();
 }

@@ -1,12 +1,6 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// PauseMenu.cs
-// ═══════════════════════════════════════════════════════════════════════════
 using UnityEngine;
+using UnityEngine.InputSystem;
 
-/// <summary>
-/// Pause menu. Toggle with Escape. Restores cursor visibility while paused.
-/// Attach to a persistent Canvas or dedicated PauseMenu GameObject.
-/// </summary>
 public class PauseMenu : MonoBehaviour
 {
     public GameObject pausePanel;
@@ -19,7 +13,8 @@ public class PauseMenu : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Escape)) TogglePause();
+        if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
+            TogglePause();
     }
 
     public void TogglePause() { if (isPaused) Resume(); else Pause(); }

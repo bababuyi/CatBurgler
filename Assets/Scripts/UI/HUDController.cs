@@ -16,6 +16,9 @@ public class HUDController : MonoBehaviour
     [Tooltip("A fill-type Image that fills up as the next charge regenerates.")]
     public Image hissRegenBar;
 
+    [Header("Visibility")]
+    public GameObject hudContent;
+
     private HealthScript playerHealth;
     private PlayerCombat playerCombat;
     private GameManager gm;
@@ -54,6 +57,13 @@ public class HUDController : MonoBehaviour
 
     private void Update()
     {
+        if (hudContent != null)
+        {
+            bool shouldShow = Time.timeScale > 0f;
+            if (hudContent.activeSelf != shouldShow)
+                hudContent.SetActive(shouldShow);
+        }
+
         if (hissRegenBar != null && playerCombat != null)
         {
             bool isRegening = playerCombat.CurrentCharges < playerCombat.maxHissCharges;
